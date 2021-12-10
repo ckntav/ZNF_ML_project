@@ -2,6 +2,9 @@
 
 library(tidyverse)
 library(GenomicRanges)
+library(ChIPseeker)
+library(AnnotationDbi)
+library(ef.utils)
 
 #####
 keepStdChr <- function(gr) {
@@ -34,38 +37,53 @@ raji_R2 <- load_peak("GSM3043268_Raji.R2") %>% keepStdChr()
 u2os_R1 <- load_peak("GSM3043270_USOS.R1") %>% keepStdChr()
 u2os_R2 <- load_peak("GSM3043271_USOS.R2") %>% keepStdChr()
 
+gencode_v38 <- loadDb(file = "input/gencode/txdb.gencode38BasicChr.sqlite")
 
+# annotate peaks
+peakAnno_raji_R1 <- annotatePeak(raji_R1, TxDb=gencode_v38, annoDb="org.Hs.eg.db")
+peakAnno_raji_R2 <- annotatePeak(raji_R2, TxDb=gencode_v38, annoDb="org.Hs.eg.db")
+peakAnno_u2os_R1 <- annotatePeak(u2os_R1, TxDb=gencode_v38, annoDb="org.Hs.eg.db")
+peakAnno_u2os_R2 <- annotatePeak(u2os_R2, TxDb=gencode_v38, annoDb="org.Hs.eg.db")
 
+peakAllListAll = list("raji_R1" = peakAnno_raji_R1,
+                      "raji_R2" = peakAnno_raji_R2,
+                      "u2os_R1" = peakAnno_u2os_R1,
+                      "u2os_R2" = peakAnno_u2os_R2)
 
-#####
-load_cofactor_peaks <- function(cofactors = c("MED1", "BRD4", "CDK9", "NIPBL", "SMC1A"), type) {
-  ENCODE_blacklist <- rtracklayer::import("input/ENCODE_blacklist_ENCFF419RSJ.bed")
-  peaks_dir <- "output/chip-pipeline-GRCh38/peak_call"
-  # artefact <- GRanges(seqnames = "chr3", IRanges(start = 93470340, end = 93470809))
-  cofactors_peaks <- GRangesList()
-  name_cofactors_peaks <- c()
-  for (cofactor in cofactors) {
-    for (condition in c("CTRL", "DEX")) {
-      message("####\t", cofactor, " | ", condition)
-      basename <- paste("A549", condition,cofactor, "rep1", type, sep = "_")
-      peaks_path <- file.path(peaks_dir, basename, paste0(basename, "_peaks.", type, "Peak.bed"))
-      # message(peaks_path)
-      peaks <- rtracklayer::import(peaks_path)
-      message("Number of regions : ", length(peaks))
-      if (sum(countOverlaps(peaks, ENCODE_blacklist)) != 0) {
-        message("\t> Remove ", length(subsetByOverlaps(peaks, ENCODE_blacklist)), " blacklisted ENCODE regions")
-        peaks <- subsetByOverlaps(peaks, ENCODE_blacklist, invert = TRUE)
-        message("\tNumber of regions : ", length(peaks))
-      }
-      cofactors_peaks <- append(cofactors_peaks, GRangesList(peaks))
-      name_cofactors_peaks <- c(name_cofactors_peaks, paste0(cofactor, "_", condition))
-    }
-  }
-  names(cofactors_peaks) <- name_cofactors_peaks
-  message("#####################################")
-  message("Available set of regions: ")
-  print(names(cofactors_peaks))
-  return(cofactors_peaks)
-}
+plotAnnoBar(peakAllListAll)
+plotDistToTSS(peakAllListAll, title = "Distribution of peaks relative to TSS")
 
+write_tsv(peakAnno_raji_R1 %>% as.data.frame,
+          file = "output/peak_annotation/peakAnno_raji_R1.tsv")
+write_tsv(peakAnno_raji_R2 %>% as.data.frame,
+          file = "output/peak_annotation/peakAnno_raji_R2.tsv")
+write_tsv(peakAnno_u2os_R1 %>% as.data.frame,
+          file = "output/peak_annotation/peakAnno_u2os_R1.tsv")
+write_tsv(peakAnno_u2os_R2 %>% as.data.frame,
+          file = "output/peak_annotation/peakAnno_u2os_R2.tsv")
 
+# consensus peak raji
+raji_list <- GRangesList("raji_R1" = raji_R1, "raji_R2" = raji_R2)
+intersect_raji <- build_intersect(raji_list)
+raji_twoR <- rowSums(intersect_raji$Matrix) >= 2
+raji_consensus <- intersect_raji$Regions[raji_twoR]
+
+peakAnno_raji_consensus <- annotatePeak(raji_consensus, TxDb=gencode_v38, annoDb="org.Hs.eg.db")
+write_tsv(peakAnno_raji_consensus %>% as.data.frame,
+          file = "output/peak_annotation/peakAnno_raji_consensus.tsv")
+
+# consensus peak u2os
+u2os_list <- GRangesList("u2os_R1" = u2os_R1, "u2os_R2" = u2os_R2)
+intersect_u2os <- build_intersect(u2os_list)
+u2os_twoR <- rowSums(intersect_u2os$Matrix) >= 2
+u2os_consensus <- intersect_u2os$Regions[u2os_twoR]
+
+peakAnno_u2os_consensus <- annotatePeak(u2os_consensus, TxDb=gencode_v38, annoDb="org.Hs.eg.db")
+write_tsv(peakAnno_u2os_consensus %>% as.data.frame,
+          file = "output/peak_annotation/peakAnno_u2os_consensus.tsv")
+
+#
+peakAllConsensus <- list("raji_consensus" = peakAnno_raji_consensus,
+                         "u2os_consensus" = peakAnno_u2os_consensus)
+plotAnnoBar(peakAllConsensus)
+plotDistToTSS(peakAllConsensus, title = "Distribution of peaks relative to TSS")
